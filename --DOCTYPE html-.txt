@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Ticket Ageing</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.0.0-beta23/dist/js/tabler.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@tabler/core@1.0.0-beta23/dist/css/tabler.min.css"
+    />
+    <style>
+      :root {
+        --bg-dark: #121826;
+        --card-bg: #1f2937;
+        --text-light: #f1f5f9;
+        --text-muted: #94a3b8;
+        --accent-green: #22c55e;
+        --accent-yellow: #facc15;
+        --accent-red: #ef4444;
+        --border-light: rgba(255, 255, 255, 0.1);
+      }
+
+      body {
+        background-color: var(--bg-dark);
+        color: var(--text-light);
+        font-family: "Segoe UI", sans-serif;
+      }
+
+      .ticket-card {
+        max-width: 650px;
+        margin: 2rem auto;
+        padding: 1.5rem;
+        border-radius: 14px;
+        background-color: var(--card-bg);
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        animation: fadeIn 0.6s ease-in-out;
+      }
+
+      .card-title {
+        color: var(--text-light);
+        font-size: 1.5rem;
+        font-weight: 600;
+      }
+
+      .field-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 1rem 0;
+        border-bottom: 1px solid var(--border-light);
+      }
+
+      .field-title {
+        font-weight: 500;
+        color: var(--text-muted);
+      }
+
+      .field-value {
+        font-weight: 600;
+        color: var(--text-light);
+      }
+
+      .badge-status {
+        padding: 0.35rem 0.65rem;
+        border-radius: 0.375rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #fff;
+      }
+
+      .bg-status-open {
+        background-color: var(--accent-green);
+      }
+
+      .bg-status-closed {
+        background-color: var(--accent-red);
+      }
+
+      .bg-status-hold {
+        background-color: var(--accent-yellow);
+        color: #000;
+      }
+
+      #closedDateRow {
+        display: none;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="ticket-card card">
+      <div class="card-header border-0">
+        <h2 class="card-title">🎫 Ticket Details</h2>
+      </div>
+      <div class="card-body">
+        <div class="field-row">
+          <span class="field-title">Ticket No</span>
+          <span class="field-value" id="ticketNo">--</span>
+        </div>
+        <div class="field-row">
+          <span class="field-title">Ticket Status</span>
+          <span class="field-value" id="ticketStatusBadge">--</span>
+        </div>
+        <div class="field-row" id="createdDateRow">
+          <span class="field-title">Created On</span>
+          <span class="field-value" id="ticketCD">--</span>
+        </div>
+        <div class="field-row" id="closedDateRow">
+          <span class="field-title">Closed On</span>
+          <span class="field-value" id="ticketclosed">--</span>
+        </div>
+        <div class="field-row">
+          <span class="field-title">Ticket Age</span>
+          <span class="field-value" id="ticketAge">--</span>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://js.zohostatic.in/support/developer_sdk/v1/js/ZohoDeskClientSDK.min.js"></script>
+    <script>
+      window.onload = function () {
+        ZOHODESK.extension.onload().then(function (App) {
+          ZOHODESK.get("ticket")
+            .then(function (res) {
+              const options = {
+                year: "numeric",
+                month: "short",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: true,
+              };
+              const ticketStatus = res.ticket.status;
+              const ticketNumber = res.ticket.number;
+              const createDate = new Date(res.ticket.createdTime);
+
+              document.getElementById("ticketNo").innerText = ticketNumber;
+              document.getElementById("ticketCD").innerText = createDate.toLocaleString("en-GB", options);
+
+              let statusClass = "bg-secondary";
+              if (ticketStatus.toLowerCase() === "open") statusClass = "bg-status-open";
+              else if (ticketStatus.toLowerCase() === "closed") statusClass = "bg-status-closed";
+              else if (ticketStatus.toLowerCase() === "on hold") statusClass = "bg-status-hold";
+
+              document.getElementById("ticketStatusBadge").innerHTML =
+                `<span class="badge badge-status ${statusClass}">${ticketStatus}</span>`;
+
+              if (ticketStatus.toLowerCase() !== "closed") {
+                document.getElementById("closedDateRow").style.display = "none";
+                let fromDate = res.ticket.cf.cf_reopen_date
+                  ? new Date(res.ticket.cf.cf_reopen_date)
+                  : createDate;
+                const currentDate = new Date();
+                const diffInMillis = currentDate - fromDate;
+                const diffDays = Math.floor(diffInMillis / (1000 * 60 * 60 * 24));
+                document.getElementById("ticketAge").innerText = `${diffDays} Days`;
+                document.getElementById("ticketclosed").innerText = "--";
+              } else {
+                document.getElementById("closedDateRow").style.display = "flex";
+
+                const requestObj = {
+                  url: `https://desk.zoho.in/api/v1/tickets/${res.ticket.id}`,
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  postBody: {},
+                  type: "GET",
+                  connectionLinkName: "zoauth",
+                };
+
+                ZOHODESK.request(requestObj).then((res) => {
+                  const ticketInfo = JSON.parse(JSON.parse(res).response);
+                  console.log(ticketInfo); // Inspect the data
+
+                  // Access fields from statusMessage
+                  const closedTime = ticketInfo.statusMessage.closedTime;
+                  const ticketAge = ticketInfo.statusMessage.cf && ticketInfo.statusMessage.cf.cf_aging;
+
+                  // Set Closed On
+                  if (closedTime) {
+                    const closedDate = new Date(closedTime);
+                    const formatedClosedDate = closedDate.toLocaleString("en-GB", options);
+                    console.log("Closed Time:", closedTime, "Formatted:", formatedClosedDate);
+                    document.getElementById("ticketclosed").innerText = formatedClosedDate;
+                  } else {
+                    console.log("No closedTime found in API response");
+                    document.getElementById("ticketclosed").innerText = "--";
+                  }
+
+                  // Set Ticket Age
+                  if (ticketAge !== undefined && ticketAge !== null && ticketAge !== "") {
+                    document.getElementById("ticketAge").innerText = `${ticketAge} Days`;
+                  } else {
+                    document.getElementById("ticketAge").innerText = "--";
+                  }
+                });
+              }
+            })
+            .catch(function (err) {
+              console.error("Error fetching ticket:", err);
+            });
+        });
+      };
+    </script>
+  </body>
+</html>
