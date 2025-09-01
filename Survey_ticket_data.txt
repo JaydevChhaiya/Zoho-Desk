@@ -1,0 +1,39 @@
+org_id = 670444719;
+ticket = zoho.desk.getRecordById(org_id,"tickets",ticket_id);
+contact_id = ticket.get("contactId");
+contact_data = zoho.desk.getRecordById(org_id,"contacts",contact_id);
+contact_email = ticket.get("email");
+closed_time = ticket.get("closedTime").getPrefix("T").toDate();
+Current_Date = zoho.currentdate;
+search_map = {"email":contact_email};
+ticket_resp = zoho.desk.searchRecords(org_id,"tickets",search_map);
+ticket_list = list();
+for each  t in ticket_resp.get("data")
+{
+	if(!isNull(t.get("closedTime")))
+	{
+		t_closed_date = t.get("closedTime").getPrefix("T").toDate();
+		if(t_closed_date == Current_Date)
+		{
+			ticket_list.add(t);
+		}
+	}
+}
+info "Tickets closed today for this email: " + ticket_list.size();
+// Send survey only if this is the first closed ticket today
+if(ticket_list.size() == 1)
+{
+	survey_link = "https://survey.zohopublic.com/zs/1iDAWL?ticket_no1=" + ticket.get("ticketNumber") + "&customer_name=" + contact_data.get("lastName") + "&subject=" + ticket.get("subject");
+	sendmail
+	[
+		from :zoho.adminuserid
+		to :contact_email
+		subject :"We’d love your feedback!"
+		message :"Hi " + ifnull(contact_data.get("lastName"),"") + ",<br><br>" + "Thank you for using our services. We value your feedback and would appreciate it if you could take a moment to complete our short survey.<br><br>" + "Please click the link below to share your feedback:<br><br>" + "<a href='" + survey_link + "' target='_blank'>Click here to take the survey</a><br><br>" + "Your response will help us serve you better.<br><br>" + "Best regards,<br>Your Support Team"
+	]
+	info "First ticket closed today, sending survey email.";
+}
+else
+{
+	info "Not first ticket closed today, no email triggered.";
+}
