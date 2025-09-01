@@ -1,0 +1,55 @@
+ticket_number = survey.get("question").get("B").get("response");
+info "Ticket Number: " + ticket_number;
+nps_score = survey.get("question").get("A").get("response");
+info "NPS Score: " + nps_score;
+org_id = 670444719;
+search_map = {"ticketNumber":ticket_number};
+ticket_resp = zoho.desk.searchRecords(org_id,"tickets",search_map);
+info "Search Record Response : " + ticket_resp;
+ticket_list = ticket_resp.get("data");
+info "Ticket List: " + ticket_list;
+if(ticket_list != null && ticket_list.size() > 0)
+{
+	ticket = ticket_list.get(0);
+	ticket_id = ticket.get("id").toLong();
+	info "Ticket ID: " + ticket_id;
+	contact_id = ticket.get("contactId");
+	contact_name = ticket.get("contact").get("name");
+	// Determine NPS Type based on score
+	nps_type = "";
+	if(nps_score.toLong() >= 9 && nps_score.toLong() <= 10)
+	{
+		nps_type = "Promoters";
+	}
+	else if(nps_score.toLong() >= 7 && nps_score.toLong() <= 8)
+	{
+		nps_type = "Passives";
+	}
+	else if(nps_score.toLong() >= 0 && nps_score.toLong() <= 6)
+	{
+		nps_type = "Detractors";
+	}
+	cf_map = Map();
+	cf_map.put("cf_nps_score",nps_score.toString());
+	cf_map.put("cf_nps_type",nps_type);
+	update_map = Map();
+	update_map.put("cf",cf_map);
+	update_resp = zoho.desk.update(org_id,"tickets",ticket_id,update_map,"zoho_desk");
+	info "Update Response: " + update_resp;
+	if(nps_type == "Detractors")
+	{
+		new_ticket_map = Map();
+		// 		new_ticket_map.put("subject",ticket.get("subject"));
+		new_ticket_map.put("subject","Detractor Ticket - " + ticket.get("subject"));
+		new_ticket_map.put("departmentId",ticket.get("departmentId"));
+		new_ticket_map.put("contactId",contact_id);
+		new_ticket_map.put("description","Customer gave an NPS score of " + nps_score.toString() + ". Please follow up with them for feedback.");
+		new_ticket_map.put("priority","High");
+		create_resp = zoho.desk.create(org_id,"tickets",new_ticket_map,"zoho_desk");
+		info "New Ticket Created: " + create_resp;
+	}
+}
+else
+{
+	info "Ticket not found with this ticket number.";
+}
