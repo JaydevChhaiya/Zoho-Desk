@@ -1,6 +1,6 @@
 //Reopens a closed Zoho Desk ticket if the customer replies within 7 days; otherwise, it creates a new ticket.
 
-orgId = 60080314937;
+orgId = "123";
 
 info "===== CUSTOMER REPLY PROCESS STARTED =====";
 info "Ticket ID: " + ticketId;
