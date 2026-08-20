@@ -1,5 +1,5 @@
 //Automatically assigns Zoho Desk tickets to the appropriate team/agent and sets priority and ticket type based on matching keywords in the ticket subject or message body.
-orgId = "60069756155";
+orgId = ""123"";
 getticket = invokeurl
 [
 	url :"https://desk.zoho.in/api/v1/tickets/" + TicketID
