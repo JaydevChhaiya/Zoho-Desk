@@ -1,0 +1,317 @@
+//Identifies duplicate Zoho Desk tickets based on sender, subject, To and CC, keeps the oldest ticket open, assigns the correct team/agent, and closes the duplicate tickets.
+
+// ===================== CONFIG =====================
+deskOrgId = "123";
+// ticketId is supplied automatically by the record-creation trigger
+deskConn = "desk_conn";
+crmConn = "coqlconn";
+crmModuleAPI = "Support_Email_Priority";
+closedStatus = "Closed";
+maxRetries = 8;
+// ===================== 0. INITIAL DELAY =====================
+// Ticket just created; threads + search index lag. Wait before reading.
+cara_ = invokeurl
+[
+	url :"https://postman-echo.com/delay/10"
+	type :GET
+];
+info "Initial delay done: " + cara_.get("delay");
+// ===================== 1. SUPPORT EMAILS + PRIORITY MAP FROM CRM =====================
+supportEmails = List();
+priorityMap = Map();
+// email -> priority (number)
+agentMap = Map();
+// email -> agent map
+teamMap = Map();
+// email -> team map
+crmResp = invokeurl
+[
+	url :"https://www.zohoapis.in/crm/v8/" + crmModuleAPI + "?fields=Name,Priority,Desk_Agent_ID,Team_ID&per_page=200"
+	type :GET
+	connection:"coqlconn"
+];
+info crmResp;
+for each  rec in ifnull(crmResp.get("data"),List())
+{
+	se = ifnull(rec.get("Name"),"").toLowerCase().trim();
+	if(se != "")
+	{
+		supportEmails.add(se);
+		priorityMap.put(se,ifnull(rec.get("Priority"),0));
+		deskAgentId = ifnull(rec.get("Desk_Agent_ID"),"").toString().trim();
+		deskTeamId = ifnull(rec.get("Team_ID"),"").toString().trim();
+		if(deskAgentId != "")
+		{
+			agentMap.put(se,deskAgentId);
+		}
+		if(deskTeamId != "")
+		{
+			teamMap.put(se,deskTeamId);
+		}
+	}
+}
+if(supportEmails.isEmpty())
+{
+	info "No support emails in CRM. Exiting.";
+	return;
+}
+// ===================== 2. CURRENT TICKET =====================
+currentTicket = zoho.desk.getRecordById(deskOrgId,"tickets",ticketId.toLong(),"desk_conn");
+curSubject = ifnull(currentTicket.get("subject"),"").trim();
+curEmail = ifnull(currentTicket.get("email"),"").toLowerCase().trim();
+curStatus = ifnull(currentTicket.get("status"),"");
+if(curStatus == closedStatus || curEmail == "" || curSubject == "")
+{
+	info "Closed or missing data. Exiting.";
+	return;
+}
+// ===================== 3. CURRENT TICKET TO + CC (with retry + delay) =====================
+curTo = "";
+curCc = "";
+for each  r in {1,2,3,4,5,6,7,8}
+{
+	if(r > maxRetries || curTo.contains("@"))
+	{
+		break;
+	}
+	threadsResp = invokeurl
+	[
+		url :"https://desk.zoho.in/api/v1/tickets/" + ticketId + "/threads"
+		type :GET
+		headers:{"orgId":deskOrgId}
+		connection:"desk_conn"
+	];
+	threadsList = ifnull(threadsResp.get("data"),List());
+	if(!threadsList.isEmpty())
+	{
+		firstThreadId = threadsList.get(0).get("id").toString();
+		fullThread = invokeurl
+		[
+			url :"https://desk.zoho.in/api/v1/tickets/" + ticketId + "/threads/" + firstThreadId
+			type :GET
+			headers:{"orgId":deskOrgId}
+			connection:"desk_conn"
+		];
+		curTo = ifnull(fullThread.get("to"),"").toLowerCase().trim();
+		curCc = ifnull(fullThread.get("cc"),"").toLowerCase().trim();
+	}
+	if(!curTo.contains("@"))
+	{
+		// thread not ready yet, wait and retry
+		d_ = invokeurl
+		[
+			url :"https://postman-echo.com/delay/5"
+			type :GET
+		];
+	}
+}
+info "Current To=[" + curTo + "] Cc=[" + curCc + "]";
+if(curTo == "" || !curTo.contains("@"))
+{
+	info "Thread To invalid after retries: [" + curTo + "]. Exiting.";
+	return;
+}
+// ===================== 4. SUPPORT ADDRESSES PRESENT (need 2+) =====================
+curCombined = curTo + "," + curCc;
+presentEmails = List();
+for each  se in supportEmails
+{
+	if(curCombined.contains(se))
+	{
+		presentEmails.add(se);
+	}
+}
+if(presentEmails.size() < 2)
+{
+	info "Only " + presentEmails.size() + " support address(es). No dedup needed.";
+	return;
+}
+info presentEmails.size() + " support addresses present. Searching duplicates.";
+// ===================== 5. SIBLING TICKETS BY SENDER (with retry + delay) =====================
+allTickets = List();
+for each  r in {1,2,3,4,5,6,7,8}
+{
+	if(r > maxRetries)
+	{
+		break;
+	}
+	searchResp = invokeurl
+	[
+		url :"https://desk.zoho.in/api/v1/tickets/search?email=" + curEmail + "&limit=100"
+		type :GET
+		headers:{"orgId":deskOrgId}
+		connection:"desk_conn"
+	];
+	allTickets = ifnull(searchResp.get("data"),List());
+	if(allTickets.size() > 1)
+	{
+		break;
+	}
+	// search index lag; wait and retry
+	d2_ = invokeurl
+	[
+		url :"https://postman-echo.com/delay/5"
+		type :GET
+	];
+}
+info "Search returned " + allTickets.size() + " ticket(s) for sender.";
+// ===================== 6. BUILD DUPLICATE GROUP (incl. current) =====================
+// Match rule: same sender + same subject + same To + same Cc + open.
+group = List();
+cm = Map();
+cm.put("id",ticketId.toString());
+cm.put("ticketNumber",ifnull(currentTicket.get("ticketNumber"),ticketId).toString());
+group.add(cm);
+for each  t in allTickets
+{
+	tId = t.get("id").toString();
+	if(tId == ticketId.toString())
+	{
+		continue;
+	}
+	tSubject = ifnull(t.get("subject"),"").trim();
+	tStatus = ifnull(t.get("status"),"");
+	tEmail = ifnull(t.get("email"),"").toLowerCase().trim();
+	if(tEmail == curEmail && tSubject == curSubject && tStatus != closedStatus)
+	{
+		tTo = "";
+		tCc = "";
+		tThreadsResp = invokeurl
+		[
+			url :"https://desk.zoho.in/api/v1/tickets/" + tId + "/threads"
+			type :GET
+			headers:{"orgId":deskOrgId}
+			connection:"desk_conn"
+		];
+		tThreadsList = ifnull(tThreadsResp.get("data"),List());
+		if(!tThreadsList.isEmpty())
+		{
+			tFirstThreadId = tThreadsList.get(0).get("id").toString();
+			tFullThread = invokeurl
+			[
+				url :"https://desk.zoho.in/api/v1/tickets/" + tId + "/threads/" + tFirstThreadId
+				type :GET
+				headers:{"orgId":deskOrgId}
+				connection:"desk_conn"
+			];
+			tTo = ifnull(tFullThread.get("to"),"").toLowerCase().trim();
+			tCc = ifnull(tFullThread.get("cc"),"").toLowerCase().trim();
+		}
+		if(tTo == curTo && tCc == curCc)
+		{
+			gm = Map();
+			gm.put("id",tId);
+			gm.put("ticketNumber",ifnull(t.get("ticketNumber"),tId).toString());
+			group.add(gm);
+			info "Duplicate matched: " + tId;
+		}
+		else
+		{
+			info "Skipped (To/Cc differ): " + tId;
+		}
+	}
+}
+info "Group size = " + group.size();
+if(group.size() < 2)
+{
+	info "No duplicates found. Exiting.";
+	return;
+}
+// ===================== 7. PICK WINNING SUPPORT EMAIL BY HIGHEST PRIORITY =====================
+// Highest Priority number wins (support=1 ... csdescalation=7).
+winningEmail = "";
+winningPriority = 999999;
+for each  se in presentEmails
+{
+	p = ifnull(priorityMap.get(se),999999);
+	if(p.toLong() < winningPriority.toLong())
+	{
+		winningPriority = p;
+		winningEmail = se;
+	}
+}
+info "Winning support email: " + winningEmail + " (priority " + winningPriority + ")";
+// ===================== 8. SURVIVOR = OLDEST TICKET IN GROUP =====================
+// Keep one ticket open; assign it the winning team/agent. Oldest (lowest id) survives.
+survivorId = group.get(0).get("id");
+survivorNumber = group.get(0).get("ticketNumber");
+for each  g in group
+{
+	if(g.get("id").toLong() < survivorId.toLong())
+	{
+		survivorId = g.get("id");
+		survivorNumber = g.get("ticketNumber");
+	}
+}
+info "Keeping open (survivor): " + survivorId;
+// ===================== 9. ASSIGN WINNING TEAM/AGENT TO SURVIVOR =====================
+// ===================== 9. ASSIGN WINNING TEAM/AGENT TO SURVIVOR =====================
+assignPayload = Map();
+winTeamId = ifnull(teamMap.get(winningEmail),"").toString().trim();
+winAgentId = ifnull(agentMap.get(winningEmail),"").toString().trim();
+info "DEBUG winningEmail=[" + winningEmail + "] team=[" + winTeamId + "] agent=[" + winAgentId + "]";
+if(winTeamId != "")
+{
+	assignPayload.put("teamId",winTeamId.toLong());
+}
+if(assignPayload.size() > 0)
+{
+	info "Assign payload (team only): " + assignPayload;
+	assignResp = invokeurl
+	[
+		url :"https://desk.zoho.in/api/v1/tickets/" + survivorId
+		type :PATCH
+		parameters:assignPayload.toString()
+		connection:"desk_conn"
+	];
+	info "Survivor team assigned: " + assignResp;
+	// now try the agent in a SEPARATE call
+	if(winAgentId != "")
+	{
+		agentPayload = Map();
+		agentPayload.put("assigneeId",winAgentId.toLong());
+		agentResp = invokeurl
+		[
+			url :"https://desk.zoho.in/api/v1/tickets/" + survivorId
+			type :PATCH
+			parameters:agentPayload.toString()
+			connection:"desk_conn"
+		];
+		info "Survivor agent assigned: " + agentResp;
+	}
+}
+else
+{
+	info "No Desk team/agent mapped for: " + winningEmail;
+}
+// ===================== 10. CLOSE EVERY OTHER TICKET IN GROUP =====================
+// Idempotent: closing an already-closed ticket is harmless.
+closedCount = 0;
+for each  g in group
+{
+	gId = g.get("id").toString();
+	if(gId == survivorId.toString())
+	{
+		continue;
+	}
+	// revoke blueprint first so the status change isn't blocked
+	revokeResp = invokeurl
+	[
+		url :"https://desk.zoho.in/api/v1/tickets/" + gId + "/revokeBlueprint"
+		type :POST
+		headers:{"orgId":deskOrgId}
+		connection:"desk_conn"
+	];
+	updatePayload = Map();
+	updatePayload.put("status",closedStatus);
+	updateResp = invokeurl
+	[
+		url :"https://desk.zoho.in/api/v1/tickets/" + gId
+		type :PATCH
+		parameters:updatePayload.toString()
+		connection:"desk_conn"
+	];
+	info "Closed #" + g.get("ticketNumber") + " -> " + updateResp;
+	closedCount = closedCount + 1;
+}
+info "Done. Survivor " + survivorId + " open, assigned " + winningEmail + ". Closed " + closedCount + " duplicate(s).";

@@ -1,0 +1,74 @@
+//Calculates the total ticket TAT in minutes and HH:MM format based on the ticket open and close times, then updates the TAT fields in Zoho Desk.
+
+orgId = 60080314937;
+info "===== TAT CALCULATION STARTED =====";
+info "Ticket ID: " + ticketId;
+// Fetch ticket
+ticketDetails = zoho.desk.getRecordById(orgId,"tickets",ticketId,"zoauth");
+info ticketDetails;
+info "Ticket fetched successfully";
+// Get values
+lastOpenStr = ticketDetails.get("cf").get("cf_reopen_date");
+existingMinutesRaw = ticketDetails.get("cf").get("cf_tat_minutes");
+closedStr = ticketDetails.get("closedTime");
+info "Last Open Raw: " + lastOpenStr;
+info "Existing Minutes Raw: " + existingMinutesRaw;
+info "Closed Time Raw: " + closedStr;
+if(lastOpenStr != null && closedStr != null)
+{
+	// Clean ISO format
+	openClean = lastOpenStr.replaceAll("T"," ").replaceAll("Z","");
+	openClean = openClean.subString(0,19);
+	closeClean = closedStr.replaceAll("T"," ").replaceAll("Z","");
+	closeClean = closeClean.subString(0,19);
+	info "Open Clean: " + openClean;
+	info "Close Clean: " + closeClean;
+	// Convert to DateTime
+	openDT = openClean.toDateTime("yyyy-MM-dd HH:mm:ss");
+	closeDT = closeClean.toDateTime("yyyy-MM-dd HH:mm:ss");
+	info "Open DT: " + openDT;
+	info "Close DT: " + closeDT;
+	// Convert existing minutes safely
+	existingMinutes = ifnull(existingMinutesRaw,0).toLong();
+	info "Existing Minutes Converted: " + existingMinutes;
+	//  Minute-level difference calculation
+	openMillis = openDT.toLong();
+	closeMillis = closeDT.toLong();
+	sessionMinutes = ((closeMillis - openMillis) / (1000 * 60)).toLong();
+	info "Session Minutes (Exact): " + sessionMinutes;
+	// Prevent negative values
+	if(sessionMinutes < 0)
+	{
+		sessionMinutes = 0;
+	}
+	totalMinutes = existingMinutes + sessionMinutes;
+	info "Total Minutes After Addition: " + totalMinutes;
+	// Convert to HH:MM
+	hoursPart = (totalMinutes / 60).toLong();
+	minutesPart = (totalMinutes % 60).toLong();
+	info "Hours Part: " + hoursPart;
+	info "Minutes Part: " + minutesPart;
+	if(minutesPart < 10)
+	{
+		minStr = "0" + minutesPart;
+	}
+	else
+	{
+		minStr = minutesPart.toString();
+	}
+	tatFormatted = hoursPart.toString() + ":" + minStr;
+	info "Formatted TAT: " + tatFormatted;
+	// Update fields
+	cfMap = Map();
+	cfMap.put("cf_tat_minutes",totalMinutes);
+	cfMap.put("cf_tat",tatFormatted);
+	updateMap = Map();
+	updateMap.put("cf",cfMap);
+	response = zoho.desk.update(orgId,"tickets",ticketId,updateMap,"zoauth");
+	info "Update Response: " + response;
+}
+else
+{
+	info "Either Last Open Time OR Closed Time is NULL";
+}
+info "===== TAT CALCULATION FINISHED =====";

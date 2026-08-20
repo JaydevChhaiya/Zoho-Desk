@@ -1,0 +1,216 @@
+//Automatically assigns Zoho Desk tickets to the appropriate team/agent and sets priority and ticket type based on matching keywords in the ticket subject or message body.
+orgId = "60069756155";
+getticket = invokeurl
+[
+	url :"https://desk.zoho.in/api/v1/tickets/" + TicketID
+	type :GET
+	connection:"desk_conn"
+];
+info getticket;
+ticketSubjectNew = ifnull(getticket.get("subject"),"");
+ticketSubjectNewLW = ticketSubjectNew.toLowerCase();
+recordValue = Map();
+latestThread = invokeurl
+[
+	url :"https://desk.zoho.in/api/v1/tickets/" + TicketID + "/latestThread?include=plainText"
+	type :GET
+	connection:"desk_conn"
+];
+message_body = "";
+if(!latestThread.isNull())
+{
+	message_body = ifnull(latestThread.get("plainText"),"");
+}
+main_subject = ticketSubjectNew;
+if(!latestThread.isNull())
+{
+	if(message_body.contains("Please follow the attached hyperlink to an important disclaimer"))
+	{
+		main_message = message_body.getPrefixIgnoreCase("Please follow the attached hyperlink to an important disclaimer");
+	}
+	else
+	{
+		main_message = message_body;
+	}
+}
+else
+{
+	main_message = "";
+}
+param = Map();
+param.put("select_query","select Priority, Name, Assigned_Team, Assigned_Agent, Keyword_Type from Keyword_Masters where (Status = 'Active') limit 2000");
+apiResponse = invokeurl
+[
+	url :"https://www.zohoapis.in/crm/v6/coql"
+	type :POST
+	parameters:param.toString()
+	connection:"coqlconn"
+];
+info "LOG: Raw API Response: " + apiResponse;
+keywordData = apiResponse.get("data");
+priorityTeamMap = Map();
+keywordPriorityMap = Map();
+keywordPriorityMap.put("High",1);
+keywordPriorityMap.put("Medium",2);
+keywordPriorityMap.put("Low",3);
+keywordPriorityMap.put("Null",4);
+info "LOG: Step 1: Searching for keywords in SUBJECT ONLY.";
+setPriority = 4;
+subjectKeywordsFound = "";
+for each  ele in keywordData
+{
+	keyword = ele.get("Name");
+	if(main_subject.containsIgnoreCase(keyword))
+	{
+		subjectKeywordsFound = subjectKeywordsFound + keyword + ", ";
+		prior = ele.get("Priority");
+		checkPrior = keywordPriorityMap.get(ifnull(prior,"Null"));
+		currentPriority = checkPrior;
+		if(setPriority.toLong() >= currentPriority.toLong())
+		{
+			assignedTeamID = "";
+			assignedAgentID = "";
+			assignedTeamLookup = ele.get("Assigned_Team");
+			info "LOG: Assigned_Team lookup value: " + assignedTeamLookup;
+			if(!isNull(assignedTeamLookup))
+			{
+				deskTeamRecordID = assignedTeamLookup.get("id");
+				deskTeamData = zoho.crm.getRecordById("Desk_Teams",deskTeamRecordID);
+				info "LOG: Desk_Teams record: " + deskTeamData;
+				assignedTeamID = ifnull(deskTeamData.get("Team_ID"),"");
+			}
+			assignedAgentLookup = ele.get("Assigned_Agent");
+			info "LOG: Assigned_Agent lookup value: " + assignedAgentLookup;
+			if(!isNull(assignedAgentLookup))
+			{
+				deskAgentRecordID = assignedAgentLookup.get("id");
+				deskAgentData = zoho.crm.getRecordById("Desk_Agents",deskAgentRecordID);
+				info "LOG: Desk_Agents record: " + deskAgentData;
+				assignedAgentID = ifnull(deskAgentData.get("Desk_Agent_ID"),"");
+			}
+			if(assignedTeamID != "" || assignedAgentID != "")
+			{
+				priorityTeamMap.put("Keyword_Name",keyword);
+				priorityTeamMap.put("Team_ID",assignedTeamID);
+				priorityTeamMap.put("Agent_ID",assignedAgentID);
+				priorityTeamMap.put("Ticket_Priority",ifnull(ele.get("Priority"),""));
+				priorityTeamMap.put("Keyword_Type",ifnull(ele.get("Keyword_Type"),""));
+				setPriority = currentPriority;
+			}
+		}
+	}
+}
+info "LOG: Keywords found in Subject: " + subjectKeywordsFound;
+if(priorityTeamMap.size() == 0)
+{
+	info "LOG: No keywords in Subject. Step 2: Searching BODY.";
+	setPriority = 4;
+	bodyKeywordsFound = "";
+	for each  ele in keywordData
+	{
+		keyword = ele.get("Name");
+		if(main_message.containsIgnoreCase(keyword))
+		{
+			bodyKeywordsFound = bodyKeywordsFound + keyword + ", ";
+			prior = ele.get("Priority");
+			checkPrior = keywordPriorityMap.get(ifnull(prior,"Null"));
+			currentPriority = checkPrior;
+			if(setPriority.toLong() >= currentPriority.toLong())
+			{
+				assignedTeamID = "";
+				assignedAgentID = "";
+				assignedTeamLookup = ele.get("Assigned_Team");
+				info "LOG: Assigned_Team lookup value: " + assignedTeamLookup;
+				if(!isNull(assignedTeamLookup))
+				{
+					deskTeamRecordID = assignedTeamLookup.get("id");
+					deskTeamData = zoho.crm.getRecordById("Desk_Teams",deskTeamRecordID);
+					info "LOG: Desk_Teams record: " + deskTeamData;
+					assignedTeamID = ifnull(deskTeamData.get("Team_ID"),"");
+				}
+				assignedAgentLookup = ele.get("Assigned_Agent");
+				info "LOG: Assigned_Agent lookup value: " + assignedAgentLookup;
+				if(!isNull(assignedAgentLookup))
+				{
+					deskAgentRecordID = assignedAgentLookup.get("id");
+					deskAgentData = zoho.crm.getRecordById("Desk_Agents",deskAgentRecordID);
+					info "LOG: Desk_Agents record: " + deskAgentData;
+					assignedAgentID = ifnull(deskAgentData.get("Desk_Agent_ID"),"");
+				}
+				if(assignedTeamID != "" || assignedAgentID != "")
+				{
+					priorityTeamMap.put("Keyword_Name",keyword);
+					priorityTeamMap.put("Team_ID",assignedTeamID);
+					priorityTeamMap.put("Agent_ID",assignedAgentID);
+					priorityTeamMap.put("Ticket_Priority",ifnull(ele.get("Priority"),""));
+					priorityTeamMap.put("Keyword_Type",ifnull(ele.get("Keyword_Type"),""));
+					setPriority = currentPriority;
+				}
+			}
+		}
+	}
+	info "LOG: Keywords found in Body: " + bodyKeywordsFound;
+}
+if(priorityTeamMap.size() == 0)
+{
+	info "LOG: No matching keyword found in Subject or Body. Leaving existing Desk assignment.";
+}
+else
+{
+	assignedTeamID = priorityTeamMap.get("Team_ID");
+	assignedAgentID = priorityTeamMap.get("Agent_ID");
+	ticketPriority = ifnull(priorityTeamMap.get("Ticket_Priority"),"");
+	keywordType = ifnull(priorityTeamMap.get("Keyword_Type"),"");
+	info "LOG: Winning keyword is '" + priorityTeamMap.get("Keyword_Name") + "'. Assigning to Team ID: " + assignedTeamID + " and Agent ID: " + assignedAgentID;
+	// AGENT ONLY ASSIGNMENT
+	// Clear existing Round Robin Team and Owner first
+	if((isNull(assignedTeamID) || assignedTeamID == "") && !isNull(assignedAgentID) && assignedAgentID != "")
+	{
+		info "LOG: Agent-only assignment detected. Clearing existing Round Robin Team and Owner.";
+		clearAssignment = Map();
+		clearAssignment.put("assigneeId",null);
+		clearAssignment.put("teamId",null);
+		clearResponse = invokeurl
+		[
+			url :"https://desk.zoho.in/api/v1/tickets/" + TicketID
+			type :PATCH
+			parameters:clearAssignment.toString()
+			connection:"desk_conn"
+		];
+		info "LOG: Existing Round Robin Team and Owner cleared: " + clearResponse;
+	}
+	if(!isNull(assignedTeamID) && assignedTeamID != "")
+	{
+		recordValue.put("teamId",assignedTeamID.toLong());
+	}
+	if(!isNull(assignedAgentID) && assignedAgentID != "")
+	{
+		recordValue.put("assigneeId",assignedAgentID.toLong());
+	}
+	if(ticketPriority != "")
+	{
+		recordValue.put("priority",ticketPriority);
+	}
+	if(keywordType != "")
+	{
+		cfMap = Map();
+		cfMap.put("cf_ticket_type",keywordType);
+		recordValue.put("cf",cfMap);
+	}
+}
+if(recordValue.size() > 0)
+{
+	info "LOG: Final recordValue to be updated: " + recordValue;
+	updateResponse = invokeurl
+	[
+		url :"https://desk.zoho.in/api/v1/tickets/" + TicketID
+		type :PATCH
+		parameters:recordValue.toString()
+		connection:"desk_conn"
+	];
+	info "LOG: Update Response: " + updateResponse;
+}
+else
+{
+	info "LOG: recordValue is empty. No update performed. Existing Desk assignment will remain.";
+}

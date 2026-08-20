@@ -1,0 +1,41 @@
+//Creates a Zoho Desk Knowledge Base article from the ticket resolution when the resolution exceeds 250 characters.
+
+orgId = 60069756155;
+getTicket = zoho.desk.getRecordById(orgId,"tickets",TicketID,"zohodesk");
+resolution = ifnull(getTicket.get("resolution"),"");
+if(!isNull(resolution) && resolution != "")
+{
+	if(resolution.length() > 250)
+	{
+		ticketSubject = ifnull(getTicket.get("subject"),"No Subject");
+		departmentId = ifnull(getTicket.get("departmentId"),"");
+		categoryId = "257710000000343052";
+		resolution = resolution.replaceAll("\"","'");
+		ticketSubject = ticketSubject.replaceAll("\"","'");
+		articleMap = Map();
+		articleMap.put("title",ticketSubject);
+		articleMap.put("answer",resolution);
+		articleMap.put("status","Published");
+		articleMap.put("categoryId",categoryId);
+		headers = Map();
+		headers.put("Content-Type","application/json");
+		headers.put("orgId",orgId);
+		createArticle = invokeurl
+		[
+			url :"https://desk.zoho.in/api/v1/articles"
+			type :POST
+			parameters:articleMap.toString()
+			headers:headers
+			connection:"desk_conn"
+		];
+		info "LOG: Article Creation Response: " + createArticle;
+		if(!isNull(createArticle.get("id")))
+		{
+			info "LOG: Success! Article ID: " + createArticle.get("id");
+		}
+		else
+		{
+			info "LOG: Failed. Response: " + createArticle;
+		}
+	}
+}

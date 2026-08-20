@@ -1,0 +1,185 @@
+//Reopens a closed Zoho Desk ticket if the customer replies within 7 days; otherwise, it creates a new ticket.
+
+orgId = 60080314937;
+
+info "===== CUSTOMER REPLY PROCESS STARTED =====";
+info "Ticket ID: " + ticketId;
+
+// Fetch ticket details
+ticketDetails = zoho.desk.getRecordById(
+	orgId,
+	"tickets",
+	ticketId,
+	"zoauth"
+);
+
+info "Ticket Details: " + ticketDetails;
+
+closedTimeStr = ticketDetails.get("closedTime");
+info "Closed Time STR: " + closedTimeStr;
+
+if(closedTimeStr != null)
+{
+	cleanStr = closedTimeStr.replaceAll("T"," ");
+	cleanStr = cleanStr.replaceAll("Z","");
+
+	if(cleanStr.length() >= 19)
+	{
+		cleanStr = cleanStr.subString(0,19);
+	}
+
+	closedTimeDT = cleanStr.toDateTime("yyyy-MM-dd HH:mm:ss");
+	currentTimeDT = zoho.currenttime;
+
+	info "ClosedTimeDT: " + closedTimeDT;
+	info "CurrentTimeDT: " + currentTimeDT;
+
+	limitTime = closedTimeDT.addDay(7);
+	info "Limit Time (Closed + 7 Days): " + limitTime;
+
+	// =====================================================
+	// Customer replied within seven days
+	// =====================================================
+	if(currentTimeDT <= limitTime)
+	{
+		info "Within seven days - processing reopening";
+
+		customFields = ticketDetails.get("cf");
+
+		if(customFields == null)
+		{
+			customFields = Map();
+		}
+
+		oldCount = ifnull(
+			customFields.get("cf_reopen_count"),
+			0
+		).toLong();
+
+		newCount = oldCount + 1;
+
+		info "Old Count: " + oldCount;
+		info "New Count: " + newCount;
+
+		// Required Zoho Desk API header
+		headerMap = Map();
+		headerMap.put("orgId",orgId.toString());
+
+		// Revoke Blueprint
+		revokeBlueprintResponse = invokeurl
+		[
+			url :"https://desk.zoho.in/api/v1/tickets/" + ticketId + "/revokeBlueprint"
+			type :POST
+			headers:headerMap
+			connection:"zoauth"
+		];
+
+		info "Revoke Blueprint Response: " + revokeBlueprintResponse;
+
+		// Continue only when Blueprint revocation succeeds
+		if(
+			revokeBlueprintResponse.get("errorCode") == null &&
+			revokeBlueprintResponse.get("message") != null
+		)
+		{
+			info "Blueprint revoked successfully";
+
+			cfMap = Map();
+			cfMap.put("cf_reopen_count",newCount);
+			cfMap.put("cf_reopen_date",currentTimeDT);
+
+			updateMap = Map();
+			updateMap.put("cf",cfMap);
+			updateMap.put("status","Reopened");
+
+			updateResponse = zoho.desk.update(
+				orgId,
+				"tickets",
+				ticketId,
+				updateMap,
+				"zoauth"
+			);
+
+			info "Ticket Update Response: " + updateResponse;
+
+			if(updateResponse.get("errorCode") == null)
+			{
+				info "SUCCESS: Ticket reopened";
+				info "Status: Re Open";
+				info "Reopen Count: " + newCount;
+				info "Reopen Date: " + currentTimeDT;
+			}
+			else
+			{
+				info "ERROR: Ticket update failed";
+				info "Error Code: " + updateResponse.get("errorCode");
+				info "Error Message: " + updateResponse.get("message");
+			}
+		}
+		else
+		{
+			info "ERROR: Blueprint revocation failed";
+			info "Ticket status was not updated";
+
+			if(revokeBlueprintResponse.get("errorCode") != null)
+			{
+				info "Error Code: " + revokeBlueprintResponse.get("errorCode");
+				info "Error Message: " + revokeBlueprintResponse.get("message");
+			}
+		}
+	}
+	else
+	{
+		// =====================================================
+		// Customer replied after seven days
+		// =====================================================
+		info "More than seven days - creating new ticket";
+
+		createMap = Map();
+		createMap.put("subject",ticketDetails.get("subject"));
+		createMap.put("departmentId",ticketDetails.get("departmentId"));
+		createMap.put("contactId",ticketDetails.get("contactId"));
+
+		if(ticketDetails.get("assigneeId") != null)
+		{
+			createMap.put(
+				"assigneeId",
+				ticketDetails.get("assigneeId")
+			);
+		}
+
+		createMap.put(
+			"description",
+			"New ticket created because the customer replied more than seven days after closure.<br><br>Original Ticket ID: " + ticketId
+		);
+
+		newTicketResponse = zoho.desk.create(
+			orgId,
+			"tickets",
+			createMap,
+			"zoauth"
+		);
+
+		info "New Ticket Response: " + newTicketResponse;
+
+		if(newTicketResponse.get("errorCode") == null)
+		{
+			info "SUCCESS: New ticket created";
+			info "New Ticket ID: " + newTicketResponse.get("id");
+			info "New Ticket Number: " + newTicketResponse.get("ticketNumber");
+		}
+		else
+		{
+			info "ERROR: New ticket creation failed";
+			info "Error Code: " + newTicketResponse.get("errorCode");
+			info "Error Message: " + newTicketResponse.get("message");
+		}
+	}
+}
+else
+{
+	info "Closed Time is NULL";
+	info "Ticket may already have been reopened";
+}
+
+info "===== CUSTOMER REPLY PROCESS FINISHED =====";

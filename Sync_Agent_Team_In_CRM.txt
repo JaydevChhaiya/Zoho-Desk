@@ -1,0 +1,147 @@
+//Syncs Zoho Desk teams and agents with Zoho CRM, creating or updating their details including role, profile, email, and status.
+
+orgId = "60080314937";
+teamResponse = invokeurl
+[
+	url :"https://desk.zoho.in/api/v1/teams"
+	type :GET
+	headers:{"orgId":orgId}
+	connection:"desk_conn"
+];
+info "Team Response: " + teamResponse;
+teamsList = ifnull(teamResponse.get("teams"),List());
+info teamsList;
+for each  team in teamsList
+{
+	deskTeamId = ifnull(team.get("id"),"");
+	teamName = ifnull(team.get("name"),"");
+	departmentId = "";
+	departmentName = "";
+	deptMap = team.get("department");
+	if(deptMap != null)
+	{
+		departmentId = ifnull(deptMap.get("id"),"");
+		departmentName = ifnull(deptMap.get("name"),"");
+	}
+	if(deskTeamId != "")
+	{
+		searchCriteria = "(Team_ID:equals:" + deskTeamId + ")";
+		existingTeam = zoho.crm.searchRecords("Desk_Teams",searchCriteria);
+		teamMap = Map();
+		teamMap.put("Name",teamName);
+		teamMap.put("Team_ID",deskTeamId);
+		if(existingTeam == null || existingTeam.isEmpty())
+		{
+			createResp = zoho.crm.createRecord("Desk_Teams",teamMap);
+			info "Team Created in CRM: " + createResp;
+		}
+		else
+		{
+			crmTeamId = existingTeam.get(0).get("id");
+			updateResp = zoho.crm.updateRecord("Desk_Teams",crmTeamId,teamMap);
+			info "Team Updated in CRM: " + updateResp;
+		}
+	}
+}
+rolesResponse = invokeurl
+[
+	url :"https://desk.zoho.in/api/v1/roles"
+	type :GET
+	headers:{"orgId":orgId}
+	connection:"desk_conn"
+];
+info "Roles Response: " + rolesResponse;
+rolesList = ifnull(rolesResponse.get("data"),List());
+if(rolesList.isEmpty())
+{
+	rolesList = ifnull(rolesResponse.get("roles"),List());
+}
+roleNameMap = Map();
+for each  role in rolesList
+{
+	roleIdValue = ifnull(role.get("id"),"");
+	roleNameValue = ifnull(role.get("name"),"");
+	if(roleIdValue != "")
+	{
+		roleNameMap.put(roleIdValue,roleNameValue);
+	}
+}
+profilesResponse = invokeurl
+[
+	url :"https://desk.zoho.in/api/v1/profiles"
+	type :GET
+	headers:{"orgId":orgId}
+	connection:"desk_conn"
+];
+info "Profiles Response: " + profilesResponse;
+profilesList = ifnull(profilesResponse.get("data"),List());
+if(profilesList.isEmpty())
+{
+	profilesList = ifnull(profilesResponse.get("profiles"),List());
+}
+profileNameMap = Map();
+for each  profile in profilesList
+{
+	profileIdValue = ifnull(profile.get("id"),"");
+	profileNameValue = ifnull(profile.get("name"),"");
+	if(profileIdValue != "")
+	{
+		profileNameMap.put(profileIdValue,profileNameValue);
+	}
+}
+agentResponse = invokeurl
+[
+	url :"https://desk.zoho.in/api/v1/agents"
+	type :GET
+	headers:{"orgId":orgId}
+	connection:"desk_conn"
+];
+info "Agent Response: " + agentResponse;
+agentsList = ifnull(agentResponse.get("data"),List());
+if(agentsList.isEmpty())
+{
+	agentsList = ifnull(agentResponse.get("agents"),List());
+}
+info agentsList;
+for each  agent in agentsList
+{
+	deskAgentId = ifnull(agent.get("id"),"");
+	agentName = ifnull(agent.get("name"),"");
+	agentEmail = ifnull(agent.get("emailId"),"");
+	roleId = ifnull(agent.get("roleId"),"");
+	profileId = ifnull(agent.get("profileId"),"");
+	status = ifnull(agent.get("status"),"");
+	roleName = "";
+	profileName = "";
+	if(roleId != "" && roleNameMap.containsKey(roleId))
+	{
+		roleName = ifnull(roleNameMap.get(roleId),"");
+	}
+	if(profileId != "" && profileNameMap.containsKey(profileId))
+	{
+		profileName = ifnull(profileNameMap.get(profileId),"");
+	}
+	if(deskAgentId != "")
+	{
+		searchAgentCriteria = "(Desk_Agent_ID:equals:" + deskAgentId + ")";
+		existingAgent = zoho.crm.searchRecords("Desk_Agents",searchAgentCriteria);
+		agentMap = Map();
+		agentMap.put("Name",agentName);
+		agentMap.put("Desk_Agent_ID",deskAgentId);
+		agentMap.put("Email",agentEmail);
+		agentMap.put("Role",roleName);
+		agentMap.put("Profile",profileName);
+		agentMap.put("Status",status);
+		if(existingAgent == null || existingAgent.isEmpty())
+		{
+			createAgentResp = zoho.crm.createRecord("Desk_Agents",agentMap);
+			info "Agent Created in CRM: " + createAgentResp;
+		}
+		else
+		{
+			crmAgentId = existingAgent.get(0).get("id");
+			updateAgentResp = zoho.crm.updateRecord("Desk_Agents",crmAgentId,agentMap);
+			info "Agent Updated in CRM: " + updateAgentResp;
+		}
+	}
+}

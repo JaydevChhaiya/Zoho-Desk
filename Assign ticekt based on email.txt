@@ -1,0 +1,34 @@
+//Automatically assigns the Zoho Desk ticket to the agent whose email is stored in the Ticket Owner Email custom field.
+
+orgId = "123";
+// ticketId = 257710000011077059;
+// Get Ticket Details
+ticket = zoho.desk.getRecordById(orgId,"tickets",ticketId,"desk_conn");
+// Get Owner Email from Custom Field
+ownerEmail = ifnull(ticket.get("cf").get("cf_ticket_owner_email"),"");
+if(ownerEmail != "")
+{
+	// Get Agent Details by Email
+	headers = {"orgId":orgId};
+	agent = invokeurl
+	[
+		url :"https://desk.zoho.in/api/v1/agents/email/" + ownerEmail
+		type :GET
+		headers:headers
+		connection:"desk_conn"
+	];
+	agentId = ifnull(agent.get("id"),"");
+	if(agentId != "")
+	{
+		updateResp = zoho.desk.update(orgId,"tickets",ticketId,{"assigneeId":agentId},"desk_conn");
+		info updateResp;
+	}
+	else
+	{
+		info "No agent found for email: " + ownerEmail;
+	}
+}
+else
+{
+	info "Ticket Owner Email is empty.";
+}
