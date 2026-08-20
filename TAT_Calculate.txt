@@ -1,4 +1,4 @@
-orgId = 60080314937;
+orgId = "123";
 info "===== TAT CALCULATION STARTED =====";
 info "Ticket ID: " + ticketId;
 // Fetch ticket
