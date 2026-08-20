@@ -1,6 +1,6 @@
 //Syncs Zoho Desk teams and agents with Zoho CRM, creating or updating their details including role, profile, email, and status.
 
-orgId = "60080314937";
+orgId = ""123"";
 teamResponse = invokeurl
 [
 	url :"https://desk.zoho.in/api/v1/teams"
